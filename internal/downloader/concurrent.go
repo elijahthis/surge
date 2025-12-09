@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -27,6 +28,9 @@ const (
 	WorkerBuffer = 128 * KB
 
 	TasksPerWorker = 4 // Target tasks per connection
+	
+	// Connection limits
+	PerHostMax = 8 // Max concurrent connections per host
 )
 
 // Buffer pool to reduce GC pressure
@@ -201,7 +205,41 @@ func createTasks(fileSize, chunkSize int64) []Task {
 	return tasks
 }
 
+// newConcurrentClient creates an http.Client tuned for concurrent downloads
+func newConcurrentClient() *http.Client {
+	transport := &http.Transport{
+		// Connection pooling
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: PerHostMax + 2, // Slightly more than max to handle bursts
+		MaxConnsPerHost:     PerHostMax,
+
+		// Timeouts to prevent hung connections
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+
+		// Performance tuning
+		DisableCompression: true, // Files are usually already compressed
+		ForceAttemptHTTP2:  true, // HTTP/2 multiplexing if available
+
+		// Dial settings for TCP reliability
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+
+	return &http.Client{
+		Transport: transport,
+		// Don't set global Timeout - use per-request context instead
+	}
+}
+
 func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath string, verbose bool, md5sum, sha256sum string) (err error) {
+	// Create tuned HTTP client for concurrent downloads
+	client := newConcurrentClient()
+
 	// 1. HEAD request to get file size
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawurl, nil)
 	if err != nil {
@@ -212,7 +250,7 @@ func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath str
 		"AppleWebKit/537.36 (KHTML, like Gecko) "+
 		"Chrome/120.0.0.0 Safari/537.36")
 
-	resp, err := d.Client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -301,7 +339,7 @@ func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath str
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			err := d.worker(ctx, workerID, rawurl, outFile, queue, &totalDownloaded, fileSize, startTime, verbose)
+			err := d.worker(ctx, workerID, rawurl, outFile, queue, &totalDownloaded, fileSize, startTime, verbose, client)
 			if err != nil {
 				workerErrors <- err
 			}
@@ -339,7 +377,7 @@ func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath str
 }
 
 // worker downloads tasks from the queue
-func (d *Downloader) worker(ctx context.Context, id int, rawurl string, file *os.File, queue *TaskQueue, downloaded *int64, totalSize int64, startTime time.Time, verbose bool) error {
+func (d *Downloader) worker(ctx context.Context, id int, rawurl string, file *os.File, queue *TaskQueue, downloaded *int64, totalSize int64, startTime time.Time, verbose bool, client *http.Client) error {
 	// Get pooled buffer
 	bufPtr := bufPool.Get().(*[]byte)
 	defer bufPool.Put(bufPtr)
@@ -353,7 +391,7 @@ func (d *Downloader) worker(ctx context.Context, id int, rawurl string, file *os
 		}
 
 		// Download this task
-		err := d.downloadTask(ctx, rawurl, file, task, buf, downloaded, totalSize, startTime, verbose)
+		err := d.downloadTask(ctx, rawurl, file, task, buf, downloaded, totalSize, startTime, verbose, client)
 		if err != nil {
 			// On error, push task back for retry (could add retry limit)
 			queue.Push(task)
@@ -363,7 +401,7 @@ func (d *Downloader) worker(ctx context.Context, id int, rawurl string, file *os
 }
 
 // downloadTask downloads a single byte range and writes to file at offset
-func (d *Downloader) downloadTask(ctx context.Context, rawurl string, file *os.File, task Task, buf []byte, downloaded *int64, totalSize int64, startTime time.Time, verbose bool) error {
+func (d *Downloader) downloadTask(ctx context.Context, rawurl string, file *os.File, task Task, buf []byte, downloaded *int64, totalSize int64, startTime time.Time, verbose bool, client *http.Client) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawurl, nil)
 	if err != nil {
 		return err
@@ -374,7 +412,7 @@ func (d *Downloader) downloadTask(ctx context.Context, rawurl string, file *os.F
 		"Chrome/120.0.0.0 Safari/537.36") 
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", task.Offset, task.Offset+task.Length-1))
 
-	resp, err := d.Client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
