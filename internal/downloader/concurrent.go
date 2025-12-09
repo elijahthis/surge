@@ -45,10 +45,11 @@ type Task struct {
 
 // TaskQueue is a thread-safe work-stealing queue
 type TaskQueue struct {
-	tasks []Task
-	mu    sync.Mutex
-	cond  *sync.Cond
-	done  bool
+	tasks       []Task
+	mu          sync.Mutex
+	cond        *sync.Cond
+	done        bool
+	idleWorkers int64 // Atomic counter for idle workers
 }
 
 func NewTaskQueue() *TaskQueue {
@@ -72,12 +73,18 @@ func (q *TaskQueue) PushMultiple(tasks []Task) {
 }
 
 func (q *TaskQueue) Pop() (Task, bool) {
+	// Mark as idle while waiting
+	atomic.AddInt64(&q.idleWorkers, 1)
+	
 	q.mu.Lock()
 	defer q.mu.Unlock()
-
+	
 	for len(q.tasks) == 0 && !q.done {
 		q.cond.Wait()
 	}
+
+	// No longer idle once we have work (or are done)
+	atomic.AddInt64(&q.idleWorkers, -1)
 
 	if len(q.tasks) == 0 {
 		return Task{}, false
@@ -99,6 +106,50 @@ func (q *TaskQueue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.tasks)
+}
+
+func (q *TaskQueue) IdleWorkers() int64 {
+	return atomic.LoadInt64(&q.idleWorkers)
+}
+
+// SplitLargestIfNeeded finds the largest queued task and splits it if > 2*MinChunk
+// Returns true if a split occurred
+func (q *TaskQueue) SplitLargestIfNeeded() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	// Find largest queued task
+	idx := -1
+	var maxLen int64 = 0
+	for i, t := range q.tasks {
+		if t.Length > maxLen && t.Length > 2*MinChunk {
+			maxLen = t.Length
+			idx = i
+		}
+	}
+
+	if idx == -1 {
+		return false // No task large enough to split
+	}
+
+	t := q.tasks[idx]
+
+	// Split in half, aligned to AlignSize
+	half := (t.Length / 2 / AlignSize) * AlignSize
+	if half < MinChunk {
+		return false // Halves would be too small
+	}
+
+	left := Task{Offset: t.Offset, Length: half}
+	right := Task{Offset: t.Offset + half, Length: t.Length - half}
+
+	// Replace original with right half, append left half
+	q.tasks[idx] = right
+	q.tasks = append(q.tasks, left)
+
+	// Wake up idle workers
+	q.cond.Broadcast()
+	return true
 }
 
 // getInitialConnections returns the starting number of connections based on file size
@@ -213,7 +264,36 @@ func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath str
 	var totalDownloaded int64
 	startTime := time.Now()
 
-	// 7. Start workers
+	// 7. Start balancer goroutine for dynamic chunk splitting
+	balancerCtx, cancelBalancer := context.WithCancel(ctx)
+	defer cancelBalancer()
+
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		maxSplits := 50 // Limit total splits to avoid over-splitting
+		splitCount := 0
+
+		for {
+			select {
+			case <-balancerCtx.Done():
+				return
+			case <-ticker.C:
+				// Only split if there are idle workers and we haven't hit the limit
+				if queue.IdleWorkers() > 0 && splitCount < maxSplits {
+					if queue.SplitLargestIfNeeded() {
+						splitCount++
+						if verbose {
+							fmt.Fprintf(os.Stderr, "\n[Balancer] Split task (total splits: %d)\n", splitCount)
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	// 8. Start workers
 	var wg sync.WaitGroup
 	workerErrors := make(chan error, numConns)
 
@@ -228,26 +308,26 @@ func (d *Downloader) concurrentDownload(ctx context.Context, rawurl, outPath str
 		}(i)
 	}
 
-	// 8. Wait for all workers to complete
+	// 9. Wait for all workers to complete
 	go func() {
 		wg.Wait()
 		close(workerErrors)
 		queue.Close()
 	}()
 
-	// Check for errors
+	// 10. Check for errors
 	for err := range workerErrors {
 		if err != nil {
 			return err
 		}
 	}
 
-	// 9. Final sync
+	// 11. Final sync
 	if err := outFile.Sync(); err != nil {
 		return fmt.Errorf("failed to sync file: %w", err)
 	}
 
-	// 10. Print final stats
+	// 12. Print final stats
 	elapsed := time.Since(startTime)
 	speed := float64(fileSize) / elapsed.Seconds()
 	fmt.Fprintf(os.Stderr, "\nDownloaded %s in %s (%s/s)\n",
