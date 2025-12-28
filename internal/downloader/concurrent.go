@@ -533,6 +533,10 @@ func (d *ConcurrentDownloader) downloadTask(ctx context.Context, rawurl string, 
 	return nil
 }
 
+// There are a lot of optimizations that can be made to this code
+// We can firstly try to identify the best task that can be stolen instead of choosing arbitrarily
+// We can have a dynamic threashold that is decided on basis of filesize or minimum work unit
+// somehow get the best task using eta?
 // StealWork tries to split an active task from a busy worker
 func (d *ConcurrentDownloader) StealWork(queue *TaskQueue) bool {
 	d.activeMu.Lock()
