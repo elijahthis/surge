@@ -1,5 +1,14 @@
-- Pausing downloads
+- Pausing downloads(done)
 - Duplicate downloads
 - Implement filename in TUI
 - add filters/sort by in TUI?
 - better colors in TUI?
+- Add ability to browse locations during adding download
+- List completed downloads feature
+- Add backoff of connections incase server sends too many requests.
+- Tune Chunk Size Tune number of connections(How to add when to add)?
+- Add support for multiple links or mirrors
+- Add support for bit torrent?
+- ./surge directory is currently local should be global in prod
+- We should design each page with much better colors and intuition
+- Check everything works with the extension properly
