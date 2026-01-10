@@ -149,7 +149,7 @@ func (m RootModel) View() string {
 		graphContent,
 		lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render(currentSpeedStr),
 	)
-	graphBox := renderBtopBox("speed", speedContent, rightWidth, topHeight, ColorNeonCyan)
+	graphBox := renderBtopBox("Speed", speedContent, rightWidth, topHeight, ColorNeonCyan, false)
 
 	// --- SECTION 3: DOWNLOAD LIST (Bottom Left) ---
 	// Tab Bar
@@ -170,7 +170,7 @@ func (m RootModel) View() string {
 		tabBar,
 		listContent,
 	)
-	listBox := renderBtopBox("downloads", listInner, leftWidth, bottomHeight, ColorNeonPink)
+	listBox := renderBtopBox("Downloads", listInner, leftWidth, bottomHeight, ColorNeonPink, true)
 
 	// --- SECTION 4: DETAILS PANE (Bottom Right) ---
 	var detailContent string
@@ -181,7 +181,7 @@ func (m RootModel) View() string {
 			lipgloss.NewStyle().Foreground(ColorNeonCyan).Render("No Download Selected"))
 	}
 
-	detailBox := renderBtopBox("file details", detailContent, rightWidth, bottomHeight, ColorGray)
+	detailBox := renderBtopBox("File Details", detailContent, rightWidth, bottomHeight, ColorGray, true)
 
 	// --- ASSEMBLY ---
 
@@ -409,8 +409,10 @@ func renderTabs(active int) string {
 }
 
 // renderBtopBox creates a btop-style box with title embedded in the top border
-// Example: ╭─ title ─────────────────────────────────╮
-func renderBtopBox(title string, content string, width, height int, borderColor lipgloss.Color) string {
+// titleRight: if true, title appears on the right side; if false, title appears on the left
+// Example (left):  ╭─ TITLE ─────────────────────────────────╮
+// Example (right): ╭─────────────────────────────────── TITLE ─╮
+func renderBtopBox(title string, content string, width, height int, borderColor lipgloss.Color, titleRight bool) string {
 	// Border characters
 	const (
 		topLeft     = "╭"
@@ -426,7 +428,7 @@ func renderBtopBox(title string, content string, width, height int, borderColor 
 		innerWidth = 1
 	}
 
-	// Build top border with embedded title: ╭─ title ──────────╮
+	// Build top border with embedded title
 	titleText := fmt.Sprintf(" %s ", title)
 	titleLen := len(titleText)
 	remainingWidth := innerWidth - titleLen - 1 // -1 for the dash after topLeft
@@ -434,10 +436,19 @@ func renderBtopBox(title string, content string, width, height int, borderColor 
 		remainingWidth = 0
 	}
 
-	topBorder := lipgloss.NewStyle().Foreground(borderColor).Render(topLeft+horizontal) +
-		lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true).Render(titleText) +
-		lipgloss.NewStyle().Foreground(borderColor).Render(strings.Repeat(horizontal, remainingWidth)) +
-		lipgloss.NewStyle().Foreground(borderColor).Render(topRight)
+	var topBorder string
+	if titleRight {
+		// Title on the right: ╭─────────────────────────────────── TITLE ─╮
+		topBorder = lipgloss.NewStyle().Foreground(borderColor).Render(topLeft+strings.Repeat(horizontal, remainingWidth)) +
+			lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true).Render(titleText) +
+			lipgloss.NewStyle().Foreground(borderColor).Render(horizontal+topRight)
+	} else {
+		// Title on the left: ╭─ TITLE ─────────────────────────────────╮
+		topBorder = lipgloss.NewStyle().Foreground(borderColor).Render(topLeft+horizontal) +
+			lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true).Render(titleText) +
+			lipgloss.NewStyle().Foreground(borderColor).Render(strings.Repeat(horizontal, remainingWidth)) +
+			lipgloss.NewStyle().Foreground(borderColor).Render(topRight)
+	}
 
 	// Build bottom border: ╰───────────────────╯
 	bottomBorder := lipgloss.NewStyle().Foreground(borderColor).Render(
