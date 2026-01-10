@@ -87,6 +87,9 @@ type RootModel struct {
 
 	// Search
 	searchQuery string // Current search filter
+
+	// Graph Data
+	SpeedHistory []float64 // Stores the last ~60 ticks of speed data
 }
 
 // NewDownloadModel creates a new download model with progress state and reporter
@@ -171,6 +174,7 @@ func InitialRootModel() RootModel {
 		filepicker:     fp,
 		Pool:           downloader.NewWorkerPool(progressChan),
 		PWD:            pwd,
+		SpeedHistory:   make([]float64, 40), // 40 points of history
 	}
 }
 

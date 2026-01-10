@@ -95,6 +95,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !d.done && !d.paused {
 					cmds = append(cmds, d.reporter.PollCmd())
 				}
+
+				// Update global speed history (Rolling buffer)
+				if len(m.SpeedHistory) > 0 {
+					totalSpeed := m.calcTotalSpeed()
+					m.SpeedHistory = append(m.SpeedHistory[1:], totalSpeed)
+				}
 				break
 			}
 		}

@@ -3,85 +3,71 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	// Colors
-	ColorPrimary   = lipgloss.Color("#bd93f9") // Dracula Purple
-	ColorSecondary = lipgloss.Color("#ff79c6") // Dracula Pink
-	ColorSuccess   = lipgloss.Color("#50fa7b") // Dracula Green
-	ColorError     = lipgloss.Color("#ff5555") // Dracula Red
-	ColorWarning   = lipgloss.Color("#ffb86c") // Dracula Orange
-	ColorText      = lipgloss.Color("#f8f8f2") // Dracula Foreground
-	ColorSubtext   = lipgloss.Color("#6272a4") // Dracula Comment
-	ColorBorder    = lipgloss.Color("#44475a") // Dracula Selection
+	// === Palette ===
+	// Vibrant "Cyberpunk" Neon Colors
+	ColorNeonPurple = lipgloss.Color("#bd93f9")
+	ColorNeonPink   = lipgloss.Color("#ff79c6")
+	ColorNeonCyan   = lipgloss.Color("#8be9fd")
+	ColorDarkGray   = lipgloss.Color("#282a36") // Background
+	ColorGray       = lipgloss.Color("#44475a") // Borders
+	ColorWhite      = lipgloss.Color("#f8f8f2")
 
-	// Styles
+	// === Layout Styles ===
+
+	// The main box surrounding everything (optional, depending on terminal size)
 	AppStyle = lipgloss.NewStyle().
-			Padding(DefaultPaddingX, 2).
-			Foreground(ColorText)
+			Background(lipgloss.Color("0")). // Transparent/Default
+			Foreground(ColorWhite)
+
+	// Standard pane border
+	PaneStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorGray).
+			Padding(0, 1)
+
+	// Focus style for the active pane
+	ActivePaneStyle = PaneStyle.
+			BorderForeground(ColorNeonPink)
+
+	// === Specific Component Styles ===
+
+	// 1. The "SURGE" Header
+	LogoStyle = lipgloss.NewStyle().
+			Foreground(ColorNeonPurple).
+			Bold(true).
+			MarginBottom(1)
+
+	// 2. The Speed Graph (Top Right)
+	GraphStyle = PaneStyle.
+			BorderForeground(ColorNeonCyan)
+
+	// 3. The Download List (Bottom Left)
+	ListStyle = ActivePaneStyle // Usually focused by default
+
+	// 4. The Detail View (Bottom Right)
+	DetailStyle = PaneStyle
+
+	// === Text Styles ===
 
 	TitleStyle = lipgloss.NewStyle().
-			Foreground(ColorPrimary).
+			Foreground(ColorNeonCyan).
 			Bold(true).
-			Padding(DefaultPaddingY, DefaultPaddingX).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorPrimary)
+			MarginBottom(1)
 
-	PanelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder).
-			Padding(DefaultPaddingY, DefaultPaddingX)
-
-	FocusedPanelStyle = PanelStyle.
-				BorderForeground(ColorSecondary)
-
-	// List Styles
-	SelectedItemStyle = lipgloss.NewStyle().
-				Foreground(ColorSecondary).
-				Bold(true)
-
-	ItemStyle = lipgloss.NewStyle().
-			Foreground(ColorText)
-
-	// Status Bar Styles
-	StatusBarStyle = lipgloss.NewStyle().
-			Foreground(ColorText).
-			Background(lipgloss.Color("#282a36")). // Dracula Background
-			Padding(DefaultPaddingY, DefaultPaddingX)
-
-	// Progress Styles
-	ProgressBarStyle = lipgloss.NewStyle().
-				Foreground(ColorSuccess)
-
-	// New Styles for Refactor
-	HeaderStyle = lipgloss.NewStyle().
-			Foreground(ColorText).
-			Bold(true).
-			Padding(DefaultPaddingY, DefaultPaddingX).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(ColorPrimary).
-			BorderBottom(true)
-
-	// Stats Style in Header
-	StatsStyle = lipgloss.NewStyle().
-			Foreground(ColorSubtext).
-			Padding(DefaultPaddingY, DefaultPaddingX)
-
-	// Base Card Style
-	CardStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorBorder).
-			Padding(DefaultPaddingY, DefaultPaddingX).
-			Margin(DefaultPaddingY, DefaultPaddingX)
-
-	// Selected Card Style (highlighted border)
-	SelectedCardStyle = CardStyle.
-				BorderForeground(ColorSecondary)
-
-	// Text inside the card
-	CardTitleStyle = lipgloss.NewStyle().
-			Foreground(ColorPrimary).
+	// Helper for bold titles inside panes
+	PaneTitleStyle = lipgloss.NewStyle().
+			Foreground(ColorNeonCyan).
 			Bold(true)
 
-	CardStatsStyle = lipgloss.NewStyle().
-			Foreground(ColorSubtext).
-			Italic(true)
+	StatsLabelStyle = lipgloss.NewStyle().
+			Foreground(ColorGray).
+			Width(12)
+
+	StatsValueStyle = lipgloss.NewStyle().
+			Foreground(ColorNeonPink).
+			Bold(true)
+
+	// Progress Bar Colors
+	ProgressStart = "#ff79c6" // Pink
+	ProgressEnd   = "#bd93f9" // Purple
 )
