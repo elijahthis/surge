@@ -202,11 +202,13 @@ func (m RootModel) getFilteredDownloads() []*DownloadModel {
 	for _, d := range m.downloads {
 		switch m.activeTab {
 		case TabQueued:
-			if !d.done && d.Speed == 0 && !d.paused {
+			// Queued: not done, not actively downloading (includes paused)
+			if !d.done && d.Speed == 0 {
 				filtered = append(filtered, d)
 			}
 		case TabActive:
-			if !d.done && (d.Speed > 0 || d.paused) {
+			// Active: only downloads with active speed
+			if !d.done && d.Speed > 0 {
 				filtered = append(filtered, d)
 			}
 		case TabDone:

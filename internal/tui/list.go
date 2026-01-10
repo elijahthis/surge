@@ -203,7 +203,7 @@ func NewDownloadList(width, height int) list.Model {
 	delegate := newDownloadDelegate()
 
 	l := list.New([]list.Item{}, delegate, width, height)
-	l.Title = "Downloads"
+	l.SetShowTitle(false) // Tab bar already shows the category
 	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(true)
 	l.SetShowHelp(true)
