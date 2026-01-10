@@ -394,17 +394,25 @@ func truncateString(s string, i int) string {
 	return s
 }
 
-func renderTabs(active int) string {
-	tabs := []string{"Queued", "Active", "Done"}
+func renderTabs(activeTab, activeCount, queuedCount, doneCount int) string {
+	tabs := []struct {
+		Label string
+		Count int
+	}{
+		{"Queued", queuedCount},
+		{"Active", activeCount},
+		{"Done", doneCount},
+	}
 	var rendered []string
 	for i, t := range tabs {
 		var style lipgloss.Style
-		if i == active {
+		if i == activeTab {
 			style = ActiveTabStyle
 		} else {
 			style = TabStyle
 		}
-		rendered = append(rendered, style.Render(t))
+		label := fmt.Sprintf("%s (%d)", t.Label, t.Count)
+		rendered = append(rendered, style.Render(label))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
