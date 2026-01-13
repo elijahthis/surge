@@ -258,8 +258,9 @@ func (m *MockServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	// Write in chunks to support byte latency and fail-after-bytes
 	chunkSize := int64(32 * 1024) // 32KB chunks
 	for bytesWritten < length {
-		// Check if we should fail
-		if m.FailAfterBytes > 0 && m.BytesServed.Load()+bytesWritten >= m.FailAfterBytes {
+		// Check if we should fail (per-request byte count, not global)
+		// This allows retry logic to work - new requests can succeed
+		if m.FailAfterBytes > 0 && bytesWritten >= m.FailAfterBytes {
 			m.FailedRequests.Add(1)
 			// Abruptly close connection by not writing more
 			return
