@@ -937,19 +937,23 @@ func (d *ConcurrentDownloader) checkWorkerHealth() {
 			continue
 		}
 
-		// Check for stalled worker (no activity for stallTimeout)
-		stallTimeout := d.Runtime.GetStallTimeout()
-		lastActivity := time.Unix(0, active.LastActivity)
-		if now.Sub(lastActivity) > stallTimeout {
-			utils.Debug("Health: Worker %d stalled (no activity for %v), cancelling", workerID, now.Sub(lastActivity))
-			if active.Cancel != nil {
-				active.Cancel()
-			}
-			continue
-		}
+		// It is an invasive function which was causing workers to be killed too vigorously.
+		// Maybe down the line we will add a timeout to kill workers after a worker is killed.
+		// The current implementation achieves better speed without this
+
+		// // Check for stalled worker (no activity for stallTimeout)
+		// stallTimeout := d.Runtime.GetStallTimeout()
+		// lastActivity := time.Unix(0, active.LastActivity)
+		// if now.Sub(lastActivity) > stallTimeout {
+		// 	utils.Debug("Health: Worker %d stalled (no activity for %v), cancelling", workerID, now.Sub(lastActivity))
+		// 	if active.Cancel != nil {
+		// 		active.Cancel()
+		// 	}
+		// 	continue
+		// }
 
 		// Check for slow worker
-		// Only cancel if: below threshold AND below minimum absolute speed
+		// Only cancel if: below threshold
 		if meanSpeed > 0 {
 			active.SpeedMu.Lock()
 			workerSpeed := active.Speed
@@ -957,9 +961,8 @@ func (d *ConcurrentDownloader) checkWorkerHealth() {
 
 			threshold := d.Runtime.GetSlowWorkerThreshold()
 			isBelowThreshold := workerSpeed > 0 && workerSpeed < threshold*meanSpeed
-			isBelowMinimum := workerSpeed < float64(minAbsoluteSpeed)
 
-			if isBelowThreshold && isBelowMinimum {
+			if isBelowThreshold {
 				utils.Debug("Health: Worker %d slow (%.2f KB/s vs mean %.2f KB/s, min %.2f KB/s), cancelling",
 					workerID, workerSpeed/1024, meanSpeed/1024, float64(minAbsoluteSpeed)/1024)
 				if active.Cancel != nil {
