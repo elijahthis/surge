@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"math"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -139,8 +140,11 @@ func formatBenchmarkResults(br BenchmarkResults) string {
 }
 
 func formatFloat(f float64, decimals int) string {
+	pow := math.Pow(10, float64(decimals))
+	rounded := math.Round(f*pow) / pow
 	format := "%." + formatInt(decimals) + "f"
-	return sprintf(format, f)
+	return sprintf(format, rounded)
+
 }
 
 func formatInt(i int) string {

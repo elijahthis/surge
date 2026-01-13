@@ -258,6 +258,9 @@ func (d *ConcurrentDownloader) calculateChunkSize(fileSize int64, numConns int) 
 
 // createTasks generates initial task queue from file size and chunk size
 func createTasks(fileSize, chunkSize int64) []Task {
+	if chunkSize <= 0 {
+		return nil
+	}
 	var tasks []Task
 	for offset := int64(0); offset < fileSize; offset += chunkSize {
 		length := chunkSize
