@@ -487,8 +487,15 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 						// Delete partial/incomplete files (only for non-completed downloads)
 						if !dl.done && dl.Destination != "" {
-							// Delete the .surge partial file
-							_ = os.Remove(dl.Destination + downloader.IncompleteSuffix)
+							// Delete the .surge partial file with retries
+							// (worker may still hold file briefly after Cancel on Windows)
+							surgeFile := dl.Destination + downloader.IncompleteSuffix
+							for i := 0; i < 5; i++ {
+								if err := os.Remove(surgeFile); err == nil {
+									break
+								}
+								time.Sleep(50 * time.Millisecond)
+							}
 						}
 
 						// Remove completed downloads from master list (for Done tab persistence)

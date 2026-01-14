@@ -524,6 +524,12 @@ func (d *ConcurrentDownloader) Download(ctx context.Context, rawurl, destPath st
 		return nil // Graceful exit, not an error
 	}
 
+	// Handle cancel: context was cancelled but not via Pause() - just exit cleanly
+	// The .surge file remains for cleanup by the TUI (which will delete it)
+	if downloadCtx.Err() == context.Canceled {
+		return nil
+	}
+
 	if downloadErr != nil {
 		return downloadErr
 	}
