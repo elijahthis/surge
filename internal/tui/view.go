@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/junaid2005p/surge/internal/tui/components"
 	"github.com/junaid2005p/surge/internal/utils"
 
 	"github.com/charmbracelet/lipgloss"
@@ -59,19 +60,14 @@ func (m RootModel) View() string {
 	}
 
 	if m.state == FilePickerState {
-		pickerContent := lipgloss.JoinVertical(lipgloss.Left,
-			"",
-			lipgloss.NewStyle().Foreground(ColorLightGray).Render(m.filepicker.CurrentDirectory),
-			"",
-			m.filepicker.View(),
-			"",
-			m.help.View(m.keys.FilePicker),
+		picker := components.NewFilePickerModal(
+			" Select Directory ",
+			m.filepicker,
+			m.help,
+			m.keys.FilePicker,
+			ColorNeonPink,
 		)
-
-		paddedContent := lipgloss.NewStyle().Padding(0, 2).Render(pickerContent)
-
-		box := renderBtopBox(PaneTitleStyle.Render(" Select Directory "), "", paddedContent, 90, 20, ColorNeonPink)
-
+		box := picker.RenderWithBtopBox(renderBtopBox, PaneTitleStyle)
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 	}
 
@@ -80,41 +76,61 @@ func (m RootModel) View() string {
 	}
 
 	if m.state == DuplicateWarningState {
-		warningContent := lipgloss.JoinVertical(lipgloss.Center,
-			lipgloss.NewStyle().Foreground(ColorNeonPink).Bold(true).Render("⚠ DUPLICATE DETECTED"),
-			"",
-			lipgloss.NewStyle().Foreground(ColorNeonPurple).Bold(true).Render(truncateString(m.duplicateInfo, 50)),
-			"",
-			lipgloss.NewStyle().Foreground(ColorLightGray).Render("[C] Continue  [F] Focus Existing  [X] Cancel"),
-		)
-
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().
-				Border(lipgloss.DoubleBorder()).
-				BorderForeground(ColorNeonPink).
-				Padding(1, 3).
-				Render(warningContent),
-		)
+		modal := components.ConfirmationModal{
+			Title:       "⚠ Duplicate Detected",
+			Message:     "A download with this URL already exists",
+			Detail:      truncateString(m.duplicateInfo, 50),
+			Keys:        m.keys.Duplicate,
+			Help:        m.help,
+			BorderColor: ColorNeonPink,
+			Width:       60,
+			Height:      10,
+		}
+		box := modal.RenderWithBtopBox(renderBtopBox, PaneTitleStyle)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 	}
 
 	if m.state == ExtensionConfirmationState {
-		confirmationContent := lipgloss.JoinVertical(lipgloss.Center,
-			lipgloss.NewStyle().Foreground(ColorNeonCyan).Bold(true).Render("EXTENSION DOWNLOAD"),
-			"",
-			lipgloss.NewStyle().Render("Do you want to add this download?"),
-			"",
-			lipgloss.NewStyle().Foreground(ColorNeonPurple).Bold(true).Render(truncateString(m.pendingURL, 50)),
-			"",
-			lipgloss.NewStyle().Foreground(ColorLightGray).Render("[Y] Yes  [N] No"),
-		)
+		modal := components.ConfirmationModal{
+			Title:       "Extension Download",
+			Message:     "Do you want to add this download?",
+			Detail:      truncateString(m.pendingURL, 50),
+			Keys:        m.keys.Extension,
+			Help:        m.help,
+			BorderColor: ColorNeonCyan,
+			Width:       60,
+			Height:      10,
+		}
+		box := modal.RenderWithBtopBox(renderBtopBox, PaneTitleStyle)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	}
 
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().
-				Border(lipgloss.DoubleBorder()).
-				BorderForeground(ColorNeonCyan).
-				Padding(1, 4).
-				Render(confirmationContent),
+	if m.state == BatchFilePickerState {
+		picker := components.NewFilePickerModal(
+			" Select URL File (.txt) ",
+			m.filepicker,
+			m.help,
+			m.keys.FilePicker,
+			ColorNeonCyan,
 		)
+		box := picker.RenderWithBtopBox(renderBtopBox, PaneTitleStyle)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	}
+
+	if m.state == BatchConfirmState {
+		urlCount := len(m.pendingBatchURLs)
+		modal := components.ConfirmationModal{
+			Title:       "Batch Import",
+			Message:     fmt.Sprintf("Add %d downloads?", urlCount),
+			Detail:      truncateString(m.batchFilePath, 50),
+			Keys:        m.keys.BatchConfirm,
+			Help:        m.help,
+			BorderColor: ColorNeonCyan,
+			Width:       60,
+			Height:      10,
+		}
+		box := modal.RenderWithBtopBox(renderBtopBox, PaneTitleStyle)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 	}
 
 	// === MAIN DASHBOARD LAYOUT ===

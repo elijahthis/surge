@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,6 +46,35 @@ func convertRuntimeConfig(rc *config.RuntimeConfig) *downloader.RuntimeConfig {
 		StallTimeout:          rc.StallTimeout,
 		SpeedEmaAlpha:         rc.SpeedEmaAlpha,
 	}
+}
+
+// readURLsFromFile reads URLs from a file, one per line (skips empty lines and comments)
+func readURLsFromFile(filepath string) ([]string, error) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	var urls []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Skip empty lines and comments
+		if line != "" && !strings.HasPrefix(line, "#") {
+			urls = append(urls, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("no URLs found in file")
+	}
+
+	return urls, nil
 }
 
 // addLogEntry adds a log entry to the log viewport
@@ -356,6 +386,38 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		if m.state == BatchFilePickerState {
+			var cmd tea.Cmd
+			m.filepicker, cmd = m.filepicker.Update(msg)
+
+			// Check if a file was selected
+			if didSelect, path := m.filepicker.DidSelectFile(msg); didSelect {
+				// Read URLs from file
+				urls, err := readURLsFromFile(path)
+				if err != nil {
+					m.addLogEntry(LogStyleError.Render("✖ Failed to read batch file: " + err.Error()))
+					// Reset filepicker and return
+					m.filepicker.FileAllowed = false
+					m.filepicker.DirAllowed = true
+					m.state = DashboardState
+					return m, nil
+				}
+
+				// Store pending URLs and show confirmation
+				m.pendingBatchURLs = urls
+				m.batchFilePath = path
+
+				// Reset filepicker to directory mode
+				m.filepicker.FileAllowed = false
+				m.filepicker.DirAllowed = true
+
+				m.state = BatchConfirmState
+				return m, nil
+			}
+
+			return m, cmd
+		}
+
 	case tea.KeyMsg:
 		switch m.state {
 		case DashboardState:
@@ -578,6 +640,15 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.SettingsSelectedRow = 0
 				m.SettingsIsEditing = false
 				return m, nil
+			}
+
+			// Batch import
+			if key.Matches(msg, m.keys.Dashboard.BatchImport) {
+				m.state = BatchFilePickerState
+				// Set filepicker to allow files (not just directories)
+				m.filepicker.FileAllowed = true
+				m.filepicker.DirAllowed = false
+				return m, m.filepicker.Init()
 			}
 
 			// If log is focused, handle viewport scrolling
@@ -815,6 +886,94 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if key.Matches(msg, m.keys.Extension.No) {
 				// Cancelled
+				m.state = DashboardState
+				return m, nil
+			}
+			return m, nil
+
+		case BatchFilePickerState:
+			if key.Matches(msg, m.keys.FilePicker.Cancel) {
+				// Reset filepicker to directory mode and return
+				m.filepicker.FileAllowed = false
+				m.filepicker.DirAllowed = true
+				m.filepicker.AllowedTypes = nil
+				m.state = DashboardState
+				return m, nil
+			}
+
+			// H key to jump to Downloads folder
+			if key.Matches(msg, m.keys.FilePicker.GotoHome) {
+				homeDir, _ := os.UserHomeDir()
+				m.filepicker.CurrentDirectory = filepath.Join(homeDir, "Downloads")
+				return m, m.filepicker.Init()
+			}
+
+			// Pass key to filepicker
+			var cmd tea.Cmd
+			m.filepicker, cmd = m.filepicker.Update(msg)
+
+			// Check if a file was selected
+			if didSelect, path := m.filepicker.DidSelectFile(msg); didSelect {
+				// Read URLs from file
+				urls, err := readURLsFromFile(path)
+				if err != nil {
+					m.addLogEntry(LogStyleError.Render("✖ Failed to read batch file: " + err.Error()))
+					// Reset filepicker and return
+					m.filepicker.FileAllowed = false
+					m.filepicker.DirAllowed = true
+					m.filepicker.AllowedTypes = nil
+					m.state = DashboardState
+					return m, nil
+				}
+
+				// Store pending URLs and show confirmation
+				m.pendingBatchURLs = urls
+				m.batchFilePath = path
+
+				// Reset filepicker to directory mode
+				m.filepicker.FileAllowed = false
+				m.filepicker.DirAllowed = true
+				m.filepicker.AllowedTypes = nil
+
+				m.state = BatchConfirmState
+				return m, nil
+			}
+
+			return m, cmd
+
+		case BatchConfirmState:
+			if key.Matches(msg, m.keys.BatchConfirm.Confirm) {
+				// Add all URLs as downloads, skipping duplicates
+				path := m.Settings.General.DefaultDownloadDir
+				if path == "" {
+					path = "."
+				}
+
+				added := 0
+				skipped := 0
+				for _, url := range m.pendingBatchURLs {
+					// Skip duplicate URLs
+					if m.checkForDuplicate(url) != nil {
+						skipped++
+						continue
+					}
+					m, _ = m.startDownload(url, path, "")
+					added++
+				}
+
+				if skipped > 0 {
+					m.addLogEntry(LogStyleStarted.Render(fmt.Sprintf("⬇ Added %d downloads from batch (%d duplicates skipped)", added, skipped)))
+				} else {
+					m.addLogEntry(LogStyleStarted.Render(fmt.Sprintf("⬇ Added %d downloads from batch", added)))
+				}
+				m.pendingBatchURLs = nil
+				m.batchFilePath = ""
+				m.state = DashboardState
+				return m, nil
+			}
+			if key.Matches(msg, m.keys.BatchConfirm.Cancel) {
+				m.pendingBatchURLs = nil
+				m.batchFilePath = ""
 				m.state = DashboardState
 				return m, nil
 			}
