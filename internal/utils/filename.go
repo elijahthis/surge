@@ -120,12 +120,16 @@ func DetermineFilename(rawurl string, resp *http.Response, verbose bool) (string
 }
 
 func sanitizeFilename(name string) string {
+	// Replace backslashes with forward slashes first so filepath.Base treats them as separators
+	name = strings.ReplaceAll(name, "\\", "/")
 	name = filepath.Base(name)
-	if name == "." || name == "/" {
+	if name == "." {
 		return name
 	}
+	if name == "/" {
+		return "_"
+	}
 	name = strings.TrimSpace(name)
-	name = strings.ReplaceAll(name, "\\", "_")
 	name = strings.ReplaceAll(name, "/", "_")
 	// Additional standard replacements for windows/linux safety
 	name = strings.ReplaceAll(name, ":", "_")
