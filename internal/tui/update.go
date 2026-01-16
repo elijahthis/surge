@@ -48,7 +48,7 @@ func convertRuntimeConfig(rc *config.RuntimeConfig) *downloader.RuntimeConfig {
 	}
 }
 
-// readURLsFromFile reads URLs from a file, one per line (skips empty lines and comments)
+// readURLsFromFile reads URLs from a file, one per line (skips empty lines, comments, and duplicates)
 func readURLsFromFile(filepath string) ([]string, error) {
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -57,12 +57,18 @@ func readURLsFromFile(filepath string) ([]string, error) {
 	defer file.Close()
 
 	var urls []string
+	seen := make(map[string]bool)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		// Skip empty lines and comments
 		if line != "" && !strings.HasPrefix(line, "#") {
-			urls = append(urls, line)
+			// Normalize URL for duplicate detection
+			normalized := strings.TrimRight(line, "/")
+			if !seen[normalized] {
+				seen[normalized] = true
+				urls = append(urls, line)
+			}
 		}
 	}
 
