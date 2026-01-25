@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Surge",
   "version": "1.0.0",
-  "description": "Intercept downloads and send them to Surge (https://github.com/surge-downloader/surge)",
+  "description": "Integrate with Surge Download Manager. Intercepts downloads to accelerate them using Surge's high-performance engine.",
   "permissions": [
     "downloads",
     "storage",
