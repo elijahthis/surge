@@ -281,13 +281,30 @@ func startHTTPServer(ln net.Listener, port int, defaultOutputDir string) {
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
 			return
 		}
-		if GlobalPool != nil {
-			GlobalPool.Pause(id)
+
+		if GlobalPool == nil {
+			http.Error(w, "Server internal error: pool not initialized", http.StatusInternalServerError)
+			return
+		}
+
+		// Try to pause active download
+		if GlobalPool.Pause(id) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "paused", "id": id})
-		} else {
-			http.Error(w, "Server internal error: pool not initialized", http.StatusInternalServerError)
+			return
 		}
+
+		// Check if it exists in DB (Cold Pause)
+		// If it exists in DB but not in pool, it's effectively paused or done.
+		entry, err := state.GetDownload(id)
+		if err == nil && entry != nil {
+			// It exists, so we consider it "paused" (or at least stopped)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "paused", "id": id, "message": "Download already stopped"})
+			return
+		}
+
+		http.Error(w, "Download not found", http.StatusNotFound)
 	})
 
 	// Resume endpoint
@@ -301,13 +318,98 @@ func startHTTPServer(ln net.Listener, port int, defaultOutputDir string) {
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
 			return
 		}
-		if GlobalPool != nil {
-			GlobalPool.Resume(id)
+
+		if GlobalPool == nil {
+			http.Error(w, "Server internal error: pool not initialized", http.StatusInternalServerError)
+			return
+		}
+
+		// Try to resume if active/paused in memory
+		if GlobalPool.Resume(id) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "resumed", "id": id})
-		} else {
-			http.Error(w, "Server internal error: pool not initialized", http.StatusInternalServerError)
+			return
 		}
+
+		// Cold Resume: Not in active pool, try loading from DB
+		entry, err := state.GetDownload(id)
+		if err != nil || entry == nil {
+			http.Error(w, "Download not found", http.StatusNotFound)
+			return
+		}
+
+		if entry.Status == "completed" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "completed", "id": id, "message": "Download already completed"})
+			return
+		}
+
+		// Load settings for runtime config
+		settings, err := config.LoadSettings()
+		if err != nil {
+			settings = config.DefaultSettings()
+		}
+
+		// Reconstruct configuration
+		runtimeConfig := convertRuntimeConfig(settings.ToRuntimeConfig())
+		outputPath := filepath.Dir(entry.DestPath)
+		if outputPath == "" || outputPath == "." {
+			outputPath = settings.General.DefaultDownloadDir
+		}
+		if outputPath == "" {
+			outputPath = "."
+		}
+
+		// Load saved state to get full progress/mirrors
+		savedState, stateErr := state.LoadState(entry.URL, entry.DestPath)
+
+		// Re-use mirrors from state if available, otherwise just URL
+		var mirrorURLs []string
+		var dmState *types.ProgressState
+
+		if stateErr == nil && savedState != nil {
+			// Create state populated from saved data
+			dmState = types.NewProgressState(id, savedState.TotalSize)
+			dmState.Downloaded.Store(savedState.Downloaded)
+			if savedState.Elapsed > 0 {
+				dmState.SetSavedElapsed(time.Duration(savedState.Elapsed))
+			}
+
+			if len(savedState.Mirrors) > 0 {
+				var mirrors []types.MirrorStatus
+				for _, u := range savedState.Mirrors {
+					mirrors = append(mirrors, types.MirrorStatus{URL: u, Active: true})
+					mirrorURLs = append(mirrorURLs, u)
+				}
+				dmState.SetMirrors(mirrors)
+			}
+		} else {
+			// Fallback if state file missing but DB entry exists
+			dmState = types.NewProgressState(id, entry.TotalSize)
+			dmState.Downloaded.Store(entry.Downloaded)
+			mirrorURLs = []string{entry.URL}
+		}
+
+		cfg := types.DownloadConfig{
+			URL:        entry.URL,
+			OutputPath: outputPath,
+			DestPath:   entry.DestPath,
+			ID:         id,
+			Filename:   entry.Filename,
+			Verbose:    false,
+			IsResume:   true,
+			ProgressCh: GlobalProgressCh,
+			State:      dmState,
+			Runtime:    runtimeConfig,
+			Mirrors:    mirrorURLs,
+		}
+
+		// Add to pool to start downloading
+		GlobalPool.Add(cfg)
+		atomic.AddInt32(&activeDownloads, 1)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "resumed", "id": id, "message": "Download cold-resumed"})
 	})
 
 	// Delete endpoint
@@ -362,11 +464,21 @@ func startHTTPServer(ln net.Listener, port int, defaultOutputDir string) {
 					}
 
 					// Calculate speed from progress
-					downloaded, _, _, sessionElapsed, _, sessionStart := cfg.State.GetProgress()
+					downloaded, _, _, sessionElapsed, connections, sessionStart := cfg.State.GetProgress()
 					sessionDownloaded := downloaded - sessionStart
 					if sessionElapsed.Seconds() > 0 && sessionDownloaded > 0 {
 						status.Speed = float64(sessionDownloaded) / sessionElapsed.Seconds() / (1024 * 1024)
+
+						// Calculate ETA (seconds remaining)
+						remaining := status.TotalSize - status.Downloaded
+						if remaining > 0 && status.Speed > 0 {
+							speedBytes := status.Speed * 1024 * 1024
+							status.ETA = int64(float64(remaining) / speedBytes)
+						}
 					}
+
+					// Get active connections count
+					status.Connections = int(connections)
 
 					// Update status based on state
 					if cfg.State.IsPaused() {
@@ -423,6 +535,17 @@ func startHTTPServer(ln net.Listener, port int, defaultOutputDir string) {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, PUT, PATCH")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -434,6 +557,7 @@ type DownloadRequest struct {
 	Path                 string   `json:"path,omitempty"`
 	RelativeToDefaultDir bool     `json:"relative_to_default_dir,omitempty"`
 	Mirrors              []string `json:"mirrors,omitempty"`
+	SkipApproval         bool     `json:"skip_approval,omitempty"` // Extension validated request, skip TUI prompt
 }
 
 func handleDownload(w http.ResponseWriter, r *http.Request, defaultOutputDir string) {
@@ -524,13 +648,6 @@ func handleDownload(w http.ResponseWriter, r *http.Request, defaultOutputDir str
 		http.Error(w, "Invalid filename", http.StatusBadRequest)
 		return
 	}
-	// Absolute paths are allowed for local tool usage
-	// if filepath.IsAbs(req.Path) { ... }
-
-	// Don't default to "." here, let TUI handle it
-	// if req.Path == "" {
-	// 	req.Path = "."
-	// }
 
 	utils.Debug("Received download request: URL=%s, Path=%s", req.URL, req.Path)
 
@@ -575,14 +692,33 @@ func handleDownload(w http.ResponseWriter, r *http.Request, defaultOutputDir str
 	outPath = utils.EnsureAbsPath(outPath)
 
 	// Check settings for extension prompt and duplicates
-	// settings already loaded above
-	if true {
-		// Check for duplicates
-		isDuplicate := false
-		if GlobalPool.HasDownload(req.URL) {
-			isDuplicate = true
-		}
+	// Logic modified to distinguish between ACTIVE (corruption risk) and COMPLETED (overwrite safe)
+	isDuplicate := false
+	isActive := false
 
+	if GlobalPool.HasDownload(req.URL) {
+		isDuplicate = true
+		// Check if specifically active\
+		allActive := GlobalPool.GetAll()
+		for _, c := range allActive {
+			if c.URL == req.URL {
+				if c.State != nil && !c.State.Done.Load() {
+					isActive = true
+				}
+				break
+			}
+		}
+	}
+
+	utils.Debug("Download request: URL=%s, SkipApproval=%v, isDuplicate=%v, isActive=%v", req.URL, req.SkipApproval, isDuplicate, isActive)
+
+	// EXTENSION VETTING SHORTCUT:
+	// If SkipApproval is true, we trust the extension completely.
+	// The backend will auto-rename duplicate files, so no need to reject.
+	if req.SkipApproval {
+		// Trust extension -> Skip all prompting logic, proceed to download
+		utils.Debug("Extension request: skipping all prompts, proceeding with download")
+	} else {
 		// Logic for prompting:
 		// 1. If ExtensionPrompt is enabled
 		// 2. OR if WarnOnDuplicate is enabled AND it is a duplicate
@@ -611,11 +747,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request, defaultOutputDir str
 				})
 				return
 			} else {
-				// Headless mode: If WarnOnDuplicate is true, we should reject it because we can't warn
-				// If ExtensionPrompt is true, we should definitely reject it because we can't prompt
-				// If it's just a duplicate and WarnOnDuplicate is true, we reject.
-				// If WarnOnDuplicate is false, we allow it (fallthrough).
-
+				// Headless mode check
 				if settings.General.ExtensionPrompt || (settings.General.WarnOnDuplicate && isDuplicate) {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusConflict)

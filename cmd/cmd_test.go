@@ -126,7 +126,7 @@ func TestSaveAndRemoveActivePort(t *testing.T) {
 // corsMiddleware Tests
 // =============================================================================
 
-func TestCorsMiddleware_PassesThroughWithoutCORS(t *testing.T) {
+func TestCorsMiddleware_SetsCORSHeaders(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -137,12 +137,12 @@ func TestCorsMiddleware_PassesThroughWithoutCORS(t *testing.T) {
 	rec := httptest.NewRecorder()
 	corsHandler.ServeHTTP(rec, req)
 
-	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Error("CORS headers should not be set")
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("CORS headers should be set for extension support")
 	}
 }
 
-func TestCorsMiddleware_OptionsPassedToHandler(t *testing.T) {
+func TestCorsMiddleware_OptionsHandledByMiddleware(t *testing.T) {
 	called := false
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -154,8 +154,12 @@ func TestCorsMiddleware_OptionsPassedToHandler(t *testing.T) {
 	rec := httptest.NewRecorder()
 	corsHandler.ServeHTTP(rec, req)
 
-	if !called {
-		t.Error("Handler should be called for OPTIONS")
+	// OPTIONS preflight should be handled by middleware, not passed to handler
+	if called {
+		t.Error("Handler should NOT be called for OPTIONS (preflight handled by middleware)")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected 200 for OPTIONS preflight, got %d", rec.Code)
 	}
 }
 
@@ -582,7 +586,7 @@ func TestStartHTTPServer_HealthEndpoint(t *testing.T) {
 	}
 }
 
-func TestStartHTTPServer_NoCORSHeaders(t *testing.T) {
+func TestStartHTTPServer_HasCORSHeaders(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Failed to create listener: %v", err)
@@ -598,8 +602,8 @@ func TestStartHTTPServer_NoCORSHeaders(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.Header.Get("Access-Control-Allow-Origin") != "" {
-		t.Error("CORS headers should not be set")
+	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("CORS headers should be set for extension support")
 	}
 }
 
@@ -620,8 +624,9 @@ func TestStartHTTPServer_OptionsRequest(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("Expected 405 for OPTIONS, got %d", resp.StatusCode)
+	// OPTIONS preflight should return 200 (handled by CORS middleware)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected 200 for OPTIONS preflight, got %d", resp.StatusCode)
 	}
 }
 
@@ -814,8 +819,8 @@ func TestCorsMiddleware_AllMethods(t *testing.T) {
 		rec := httptest.NewRecorder()
 		corsHandler.ServeHTTP(rec, req)
 
-		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
-			t.Errorf("CORS header should not be set for %s", method)
+		if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+			t.Errorf("CORS header should be set for %s (required for extension support)", method)
 		}
 	}
 }
