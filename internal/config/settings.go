@@ -10,8 +10,7 @@ import (
 // Settings holds all user-configurable application settings organized by category.
 type Settings struct {
 	General     GeneralSettings     `json:"general"`
-	Connections ConnectionSettings  `json:"connections"`
-	Chunks      ChunkSettings       `json:"chunks"`
+	Network     NetworkSettings     `json:"network"`
 	Performance PerformanceSettings `json:"performance"`
 }
 
@@ -35,19 +34,15 @@ const (
 )
 
 // ConnectionSettings contains network connection parameters.
-type ConnectionSettings struct {
+type NetworkSettings struct {
 	MaxConnectionsPerHost  int    `json:"max_connections_per_host"`
 	MaxGlobalConnections   int    `json:"max_global_connections"`
 	MaxConcurrentDownloads int    `json:"max_concurrent_downloads"`
 	UserAgent              string `json:"user_agent"`
 	ProxyURL               string `json:"proxy_url"`
 	SequentialDownload     bool   `json:"sequential_download"`
-}
-
-// ChunkSettings contains download chunk configuration.
-type ChunkSettings struct {
-	MinChunkSize     int64 `json:"min_chunk_size"`
-	WorkerBufferSize int   `json:"worker_buffer_size"`
+	MinChunkSize           int64  `json:"min_chunk_size"`
+	WorkerBufferSize       int    `json:"worker_buffer_size"`
 }
 
 // PerformanceSettings contains performance tuning parameters.
@@ -143,16 +138,14 @@ func DefaultSettings() *Settings {
 			Theme:             ThemeAdaptive,
 			LogRetentionCount: 5,
 		},
-		Connections: ConnectionSettings{
+		Network: NetworkSettings{
 			MaxConnectionsPerHost:  32,
 			MaxGlobalConnections:   100,
 			MaxConcurrentDownloads: 3,
 			UserAgent:              "", // Empty means use default UA
 			SequentialDownload:     false,
-		},
-		Chunks: ChunkSettings{
-			MinChunkSize:     2 * MB,
-			WorkerBufferSize: 512 * KB,
+			MinChunkSize:           2 * MB,
+			WorkerBufferSize:       512 * KB,
 		},
 		Performance: PerformanceSettings{
 			MaxTaskRetries:        3,
@@ -233,13 +226,13 @@ type RuntimeConfig struct {
 // ToRuntimeConfig creates a RuntimeConfig from user Settings
 func (s *Settings) ToRuntimeConfig() *RuntimeConfig {
 	return &RuntimeConfig{
-		MaxConnectionsPerHost: s.Connections.MaxConnectionsPerHost,
-		MaxGlobalConnections:  s.Connections.MaxGlobalConnections,
-		UserAgent:             s.Connections.UserAgent,
-		ProxyURL:              s.Connections.ProxyURL,
-		SequentialDownload:    s.Connections.SequentialDownload,
-		MinChunkSize:          s.Chunks.MinChunkSize,
-		WorkerBufferSize:      s.Chunks.WorkerBufferSize,
+		MaxConnectionsPerHost: s.Network.MaxConnectionsPerHost,
+		MaxGlobalConnections:  s.Network.MaxGlobalConnections,
+		UserAgent:             s.Network.UserAgent,
+		ProxyURL:              s.Network.ProxyURL,
+		SequentialDownload:    s.Network.SequentialDownload,
+		MinChunkSize:          s.Network.MinChunkSize,
+		WorkerBufferSize:      s.Network.WorkerBufferSize,
 		MaxTaskRetries:        s.Performance.MaxTaskRetries,
 		SlowWorkerThreshold:   s.Performance.SlowWorkerThreshold,
 		SlowWorkerGracePeriod: s.Performance.SlowWorkerGracePeriod,
